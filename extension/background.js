@@ -26,6 +26,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       console.error('Failed to stop capture:', err);
     });
     sendResponse({ success: true });
+  } else if (message.type === 'UPDATE_STORAGE_STATE') {
+    chrome.storage.local.set(message.data, () => {
+      sendResponse({ success: true });
+    });
+    return true; // Keep channel open for async response
   }
   return true;
 });
@@ -59,7 +64,8 @@ async function startCaptureFlow() {
 
     // 5. Read backend URL configuration (default to localhost)
     const settings = await chrome.storage.local.get(['apiUrl']);
-    const apiUrl = settings.apiUrl || 'http://127.0.0.1:3000';
+    let apiUrl = settings.apiUrl || 'http://127.0.0.1:8000';
+    apiUrl = apiUrl.replace(/\/+$/, '');
 
     // 6. Send start message with streamId to the offscreen document
     // We delay slightly to ensure the document is fully loaded and listening

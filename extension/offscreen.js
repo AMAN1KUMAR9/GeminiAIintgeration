@@ -18,20 +18,20 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'START_OFFSCREEN_CAPTURE') {
     startCapture(message.streamId, message.apiUrl).catch(err => {
       console.error('Offscreen capture error:', err);
-      chrome.storage.local.set({ status: 'error', errorMsg: err.message });
+      updateStorage({ status: 'error', errorMsg: err.message });
       stopAndCleanup();
     });
   } else if (message.type === 'STOP_OFFSCREEN_CAPTURE') {
     stopAndGenerate().catch(err => {
       console.error('Offscreen stop error:', err);
-      chrome.storage.local.set({ status: 'error', errorMsg: err.message });
+      updateStorage({ status: 'error', errorMsg: err.message });
       stopAndCleanup();
     });
   }
 });
 
 async function startCapture(streamId, targetApiUrl) {
-  apiUrl = targetApiUrl;
+  apiUrl = targetApiUrl ? targetApiUrl.replace(/\/+$/, '') : null;
   audioBufferQueue = [];
 
   // 1. Capture the tab audio using the stream ID
@@ -68,10 +68,13 @@ async function startCapture(streamId, targetApiUrl) {
 
   const startData = await startResponse.json();
   sessionId = startData.sessionId;
-  await chrome.storage.local.set({ sessionId });
+  await updateStorage({ sessionId });
 
   // 4. Setup AudioContext at 16kHz for auto-downsampling
   audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+  if (audioContext.state === 'suspended') {
+    await audioContext.resume();
+  }
 
   tabSource = audioContext.createMediaStreamSource(tabStream);
   micSource = audioContext.createMediaStreamSource(micStream);
@@ -185,14 +188,14 @@ async function stopAndGenerate() {
     const data = await generateResponse.json();
     
     // Save final summary in extension storage
-    await chrome.storage.local.set({
+    await updateStorage({
       status: 'completed',
       summary: data.summary
     });
 
   } catch (error) {
     console.error('[Offscreen] Summary generation failed:', error);
-    await chrome.storage.local.set({
+    await updateStorage({
       status: 'error',
       errorMsg: error.message
     });
@@ -215,5 +218,16 @@ function stopAndCleanup() {
   audioBufferQueue = [];
 
   // Close the offscreen document
-  chrome.offscreen.closeDocument();
+  window.close();
+}
+
+async function updateStorage(data) {
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'UPDATE_STORAGE_STATE',
+      data
+    });
+  } catch (err) {
+    console.error('[Offscreen] Error updating storage:', err);
+  }
 }

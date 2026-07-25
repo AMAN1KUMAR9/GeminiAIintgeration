@@ -226,7 +226,16 @@ app.mount("/", StaticFiles(directory="public", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    # Read port from env or default to 8000
+    # Read host and port from env
+    host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", 8000))
-    print(f"Starting server on http://127.0.0.1:{port}")
-    uvicorn.run("main:app", host="127.0.0.1", port=port, reload=True)
+    # Read reload flag from env, defaulting to False for production stability
+    reload_opt = os.getenv("RELOAD", "False").lower() in ("true", "1", "yes")
+    print(f"Starting server on http://{host}:{port} (reload={reload_opt})")
+    uvicorn.run(
+        "main:app",
+        host=host,
+        port=port,
+        reload=reload_opt,
+        reload_excludes=["uploads/*"]
+    )

@@ -15,21 +15,33 @@ let timerInterval = null;
 
 // Initialize Popup
 document.addEventListener('DOMContentLoaded', async () => {
+  const isTab = window.location.search.includes('mode=tab');
+  
   // Load state and settings
-  const state = await chrome.storage.local.get(['status', 'apiUrl', 'recordingStartTime', 'summary', 'errorMsg']);
+  let state = await chrome.storage.local.get(['status', 'apiUrl', 'recordingStartTime', 'summary', 'errorMsg']);
+  
+  // If we are in tab mode and there is a permission error, reset state so the user can interact
+  if (isTab && state.status === 'error' && state.errorMsg && state.errorMsg.includes('permission')) {
+    await chrome.storage.local.set({ status: 'ready', errorMsg: null });
+    state.status = 'ready';
+    state.errorMsg = null;
+  }
   
   // Set API URL
-  const apiUrl = state.apiUrl || 'http://127.0.0.1:3000';
+  let apiUrl = state.apiUrl || 'http://127.0.0.1:8000';
+  apiUrl = apiUrl.replace(/\/+$/, '');
   apiUrlInput.value = apiUrl;
-  if (!state.apiUrl) {
-    await chrome.storage.local.set({ apiUrl });
-  }
+  
+  // Always save cleaned URL back
+  await chrome.storage.local.set({ apiUrl });
 
   updateUI(state);
 
   // Bind settings input
   apiUrlInput.addEventListener('change', async (e) => {
-    await chrome.storage.local.set({ apiUrl: e.target.value.trim() });
+    const cleanedUrl = e.target.value.trim().replace(/\/+$/, '');
+    apiUrlInput.value = cleanedUrl;
+    await chrome.storage.local.set({ apiUrl: cleanedUrl });
   });
 
   // Bind settings panel toggle
@@ -150,6 +162,31 @@ async function handleActionClick() {
   const status = state.status || 'ready';
 
   if (status === 'ready' || status === 'completed' || status === 'error') {
+    // Request microphone permission first in the popup context (user gesture)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Stop all tracks immediately since we only wanted to trigger the permission prompt
+      stream.getTracks().forEach(track => track.stop());
+    } catch (err) {
+      console.error('Microphone permission error:', err.name, err.message);
+      const isTab = window.location.search.includes('mode=tab');
+      const detailedMsg = `Microphone access failed (${err.name}: ${err.message}).`;
+      
+      if (!isTab) {
+        chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?mode=tab') });
+        await chrome.storage.local.set({ 
+          status: 'error', 
+          errorMsg: `${detailedMsg} We opened a new tab to request it. Please click "Allow" on that page.` 
+        });
+      } else {
+        await chrome.storage.local.set({ 
+          status: 'error', 
+          errorMsg: `${detailedMsg} Please click the site settings (lock/microphone) icon in the browser URL bar to allow microphone access.` 
+        });
+      }
+      return;
+    }
+
     // Save recording start time
     await chrome.storage.local.set({ recordingStartTime: Date.now() });
     // Tell background to start capture
